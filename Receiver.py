@@ -30,7 +30,7 @@ packet = bytearray()
 print("Please input same probability as Client.")
 cor_prob = int(input("What is the probability of packet corruption?: "))
 loss_prob = int(input("What is the probability of packet loss?: "))
-expected_seq = 0
+expected_seq = 1
 
 
 def verify_checksum(data, checksum, byteorder='little'):
@@ -57,7 +57,10 @@ def corrupted(pkt):
     chk_arr = pkt[1:3]
     data = pkt[3:]
     chk = int.from_bytes(chk_arr, 'little', signed=False)
-    return not verify_checksum(data, chk)
+    isCorrupted = not verify_checksum(data, chk)
+    if isCorrupted:
+        print("***ERROR: package is corrupted")
+    return isCorrupted
 
 
 def has_seq_num(pkt, sequence):
@@ -66,7 +69,11 @@ def has_seq_num(pkt, sequence):
     the packet's sequence number.
     """
     seq = pkt[0]
-    if seq == sequence:
+    has_seq = seq == sequence
+    if not has_seq:
+        print("***ERROR: seq number is wrong")
+        print("***ERROR: pkt seq = " + str(seq) + " ,expected sequence = " + str(sequence))
+    if has_seq:
         return True
     else:
         return False
@@ -97,6 +104,9 @@ while True:
         packet.clear()
         print("***ERROR: Packet corrupted or with wrong sequence")
         Packet.make_ack(packet, expected_seq - 1)
+        # Even receiving bad packet, Server still need to respond
+        # because when data was good, that response might lost but the client doesn't know
+        UDP.send(packet, serverSocket, clientAddress, loss_prob, cor_prob)
     elif not corrupted(rcvpacket) and has_seq_num(rcvpacket, expected_seq):
         print("Got expected packet ", expected_seq)
         extract_deliver(rcvpacket)
