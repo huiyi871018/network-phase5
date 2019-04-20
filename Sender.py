@@ -36,7 +36,9 @@ TIMEOUT_INTERVAL = 0.05
 WINDOW_SIZE = int(input("What is the window size?: "))
 
 # Data shared amongst the threads
-BASE = 0
+# Set BASE to 1, becaue the response from server might equal to BASE - 1
+# To avoid negative number that might cause exception
+BASE = 1
 Mutex = _thread.allocate_lock()
 send_timer = Timer(TIMEOUT_INTERVAL)
 
@@ -97,7 +99,7 @@ def sending(sock, file):
     global send_timer
 
     packets = []
-    seq_number = 0
+    seq_number = 1
 
     # Generates all the packets from the picture
     while True:
@@ -117,45 +119,52 @@ def sending(sock, file):
     _thread.start_new_thread(receiving, (clientSocket, ))
 
     while BASE < total_packets:
-        Mutex.acquire()
+        # Comment below as we don't want to lock the whole sending process
+        # Mutex will be used on object-level
+        # Mutex.acquire()
+
+        win_size = set_window(total_packets)
+
+        # Comment below debug logs
+        # print("BASE=" + str(BASE) + " ,next_packet_num=" + str(next_packet_num))
+        # print("win_size=" + str(win_size))
 
         # Send packets within the window
-        while next_packet_num < BASE + win_size:
+        if not send_timer.timeout() and next_packet_num < BASE + win_size:
             print('Sending packet', next_packet_num)
-            UDP.send(packets[next_packet_num], sock, serverAddress, loss_prob, cor_prob)
+            UDP.send(packets[next_packet_num - 1], sock, serverAddress, loss_prob, cor_prob)
+            Mutex.acquire()
             next_packet_num += 1
-
-            # Start the timer
-            if not send_timer.running():
-                print('Starting Timer')
-                send_timer.start()
-
-            start_sleep = False
-
-            # Wait for an ack or Timeout occurs
-            while send_timer.running() and not send_timer.timeout():
-                if Mutex.locked():
-                    Mutex.release()
-                if not start_sleep:
-                    print('Sending thread going to sleep')
-                    start_sleep = True
-                time.sleep(SLEEP_TIME)
-                Mutex.acquire()
-
-            # Handle the timeout case
-            if send_timer.timeout():
-                print('Timeout has occurred\n')
-                send_timer.stop()
-                next_packet_num = BASE
-            else:
-                print('Packets Acked... Shift Window\n')
-                win_size = set_window(total_packets)
             Mutex.release()
 
-        # All packets have been sent, send a empty packet
-        print("File has been sent!!")
-        UDP.send(bytes(), sock, serverAddress, 0, 0)
-        fileSend.close()
+            if next_packet_num == BASE:
+                if not send_timer.running():
+                    print('Starting Timer')
+                    Mutex.acquire()
+                    send_timer.start()
+                    Mutex.release()
+        else:
+            if not send_timer.running():
+                Mutex.acquire()
+                send_timer.start()
+                Mutex.release()
+
+        while send_timer.running() and not send_timer.timeout():
+            print('Sending thread going to sleep')
+            time.sleep(SLEEP_TIME)
+
+        # Handle the timeout case
+        if send_timer.timeout():
+            print('Timeout has occurred\n')
+            send_timer.stop()
+            next_packet_num = BASE
+
+
+
+    # All packets have been sent, send a empty packet
+    print("File has been sent!!")
+    UDP.send(bytes(), sock, serverAddress, 0, 0)
+    fileSend.close()
 
 
 def receiving(sckt):
@@ -179,40 +188,5 @@ def receiving(sckt):
 
 print('Beginning Sender')
 sending(clientSocket, fileSend)
-clientSocket.close()
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
+# comment below to avoid thread exception
+#clientSocket.close()
